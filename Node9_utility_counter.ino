@@ -1,3 +1,6 @@
+#include <EEPROMVar.h>
+#include <EEPROMex.h>
+
 //#include <Arduino.h>
 //#define NOT_AN_INTERRUPT -1
 #include <JeeLib.h>
@@ -19,15 +22,20 @@
 
 //define initial variables
 
-int gas_num = 11231;          // The actual reading that the gas company want
-int gas_hund = 66;         // The thousandths of a unit
+int gas_num = 11236;          // The actual reading that the gas company want
+int oldGas_num = 0;
+int gas_hund = 0;         // The thousandths of a unit
 
 int elect_num = 0;        // The actual reading the elctricity company want
+int oldElect_num;
 int elect_thou = 0;        // The thousandths of a unit
 
 int gasPin = 3;
 int gasState = 1;
 int oldGasState =1;
+const int maxAllowedWrites = 80;
+
+//Port leds(4);
 
 typedef struct {
   int gasReading, gasReadingHund, electricReading, electricReadingThou;
@@ -35,11 +43,15 @@ typedef struct {
 PayloadU;
 PayloadU utility;
 
-long previousMillis = 0;        // will store last time LED was updated
-long interval = 10000;          // interval at which to blink (milliseconds)
+//long previousMillis = 0;        // will store last time LED was updated
+//long interval = 10000;          // interval at which to blink (milliseconds)
+
+ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 
 void setup() {
   rf12_initialize(9, RF12_433MHZ, 210);
+  //get last readings from eeprom
+  gas_num = EEPROM.readInt(255);
   Serial.begin(9600);
   Serial.println("Gas Meter Reading \t\tElectric Meter Reading");
   Serial.println();
@@ -49,60 +61,26 @@ void setup() {
   //attachInterrupt(digitalPinToInterrupt(gasPin), incrementGas(), FALLING);
   attachInterrupt(1, incrementGas, FALLING);
   //attachInterrupt(1, send_rf_data, RISING);
+  //leds.mode(OUTPUT);
+  //leds.mode2(OUTPUT);
+  //leds.digiWrite(0);
+  //leds.digiWrite2(0);
 }
 
 void loop() {
-  //  Serial.print(gas_num);
-  //  Serial.print(".");
-  //  Serial.print(gas_thou);
-  //  Serial.print("\t");
-  //  Serial.print(gasState);
-  //  Serial.print("\t\t\t");
-  //  
-  //  Serial.print(elect_num);
-  //  Serial.print(".");
-  //  Serial.print(elect_thou);
-  //  Serial.println();
-  gasState = digitalRead(gasPin);
-  
-  /*Need a better way than polling Interrupts? */
-  if(gasState != oldGasState) {
-    oldGasState = gasState;
-    if(gasState == 0) {
-      incrementGas();
-    }
-  }
-  //Serial.println(gasState);
-  if (rf12_recvDone())
-  {
-    if (rf12_crc == 0 && (rf12_hdr & RF12_HDR_CTL) == 0)  // and no rf errors
-    {
-      int node_id = (rf12_hdr & 0x1F);
-      if (node_id == 9) {
-        utility = *(PayloadU*) rf12_data;
-        gas_num = utility.gasReading;
-        gas_hund = utility.gasReadingHund;
-        elect_num = utility.electricReading;
-        elect_thou = utility.electricReadingThou;
-        Serial.println("Recieved");
-      }
-
-    }
-  }
-
-
-
-
   utility.gasReading = gas_num;
   utility.gasReadingHund = gas_hund;
-
-  unsigned long currentMillis = millis();
-
-  if(currentMillis - previousMillis > interval) {
-    // save the last time you blinked the LED 
-    previousMillis = currentMillis;
-    send_rf_data();   
+  if(gas_num != oldGas_num) {
+    //we need to update the eeprom
+    oldGas_num = gas_num;
+    EEPROM.updateInt(255, gas_num);
   }
+
+//  unsigned long currentMillis = millis();
+  send_rf_data();
+  rf12_sleep(RF12_SLEEP);
+  Sleepy::loseSomeTime(30000);
+  rf12_sleep(RF12_WAKEUP);
 }
 
 void incrementGas() {
@@ -127,7 +105,8 @@ void incrementElect() {
 
 void send_rf_data()
 {
-  //digitalWrite(activityLed, HIGH);
+//  //digitalWrite(activityLed, HIGH);
+  //leds.digiWrite(1);
   rf12_sleep(RF12_WAKEUP);
   // if ready to send + exit loop if it gets stuck as it seems too
   int i = 0; 
@@ -140,7 +119,10 @@ void send_rf_data()
   // mode 3 (full powerdown) can only be used with 258 CK startup fuses
   rf12_sendWait(2);
   rf12_sleep(RF12_SLEEP);
-  //digitalWrite(activityLed, LOW);
-}
+//  //digitalWrite(activityLed, LOW);
+  //leds.digiWrite(0);
 
+
+
+}
 
